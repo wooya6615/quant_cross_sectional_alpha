@@ -1,2 +1,6 @@
 .env
 *.csv
+test.py
+*.parquet
+/data/
+__pycache__/
