@@ -1,0 +1,4 @@
+pykrx
+pandas>=2.2
+pyarrow
+python-dotenv
