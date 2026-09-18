@@ -31,8 +31,9 @@ def backtest_long_short(
     holding_period: int,
     lag: int,
     n_quantiles: int = 5,
-    cost_bps_oneway: float = COST_PER_UNIT_TURNOVER_BP,
+    cost_per_unit_turnover_bp: float = COST_PER_UNIT_TURNOVER_BP,
     direction: int = 1,
+    winsorize_pct: float = 0.0,
 ) -> pd.DataFrame:
     """리밸런싱 시점별 gross/net 수익률과 turnover를 담은 DataFrame을 반환"""
     fwd = compute_forward_returns(price_wide, lag, holding_period)
@@ -49,6 +50,9 @@ def backtest_long_short(
         if valid.sum() < MIN_VALID_TICKERS:
             continue
         aa, rr = a[valid], r[valid]
+        if winsorize_pct > 0:
+            lo, hi = rr.quantile(winsorize_pct), rr.quantile(1 - winsorize_pct)
+            rr = rr.clip(lower=lo, upper=hi)
         top_basket, bottom_basket = _quantile_backtests(aa, n_quantiles)
         if direction == 1:
             long_basket, short_basket = top_basket, bottom_basket
@@ -65,7 +69,7 @@ def backtest_long_short(
         else:
             turnover = 1.0
         
-        cost = turnover * (cost_bps_oneway / 10000) * 2
+        cost = turnover * (cost_per_unit_turnover_bp / 10000)
         net = gross - cost
         
         records.append(
