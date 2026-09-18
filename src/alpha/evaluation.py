@@ -102,12 +102,55 @@ def compute_quantile_long_short_return(
     return pd.Series(ls_returns).sort_index()
 
 
+def compute_quantile_basket_mean_vs_median(
+    alpha_wide: pd.DataFrame,
+    forward_return_wide: pd.DataFrame,
+    holding_period: int,
+    n_quantiles: int = 5,
+) -> pd.DataFrame:
+    """상위/하위 분위 롱숏을 평균 기준과 중앙값 기준 둘 다 구해서 비교"""
+    common_dates = alpha_wide.index.intersection(forward_return_wide.index)
+    sampled_dates = common_dates[::holding_period]
+    rows = []
+    for date in sampled_dates:
+        a = alpha_wide.loc[date]
+        r = forward_return_wide.loc[date]
+        valid = a.notna() & r.notna()
+        if valid.sum() < MIN_VALID_TICKERS:
+            continue
+        aa, rr = a[valid], r[valid]
+        top_cut = aa.quantile(1 - 1 / n_quantiles)
+        bottom_cut = aa.quantile(1 / n_quantiles)
+        top_r, bottom_r = rr[aa >= top_cut], rr[aa <= bottom_cut]
+        rows.append(
+            {
+                "date": date,
+                "ls_mean": top_r.mean() - bottom_r.mean(),
+                "ls_median": top_r.median() - bottom_r.median(),
+            }
+        )
+    return pd.DataFrame(rows).set_index("date")
+
+
 def yearly_regime_report(ls_return: pd.Series) -> tuple[pd.DataFrame, bool]:
+    """연도별 log-return 기여도를 구하고 국면 의존성을 판정"""
     log_ret = (1 + ls_return).apply(lambda x: pd.NA if x <= 0 else x)
     log_ret = log_ret.dropna().astype(float).apply(math.log)
     by_year = log_ret.groupby(log_ret.index.year).sum()
     total = log_ret.sum()
-    contribution = by_year / total if total != 0 else by_year * float("nan")
+    
+    if total == 0:
+        contribution = by_year * float("nan")
+        verdict = "총합이 0이라 비율 판정 불가"
+    else:
+        raw_contribution = by_year / total
+        if raw_contribution.abs().max() > 1.0:
+            contribution = by_year * float("nan")
+            verdict = "총합이 0에 가까워 비율 판정 불가 (연도별 방향이 엇갈리며 서로 상쇄됨)"
+        else:
+            contribution = raw_contribution
+            regime_dependent = contribution.abs().max() > 0.5
+            verdict = "국면 의존적 (연도 기여도 50% 초과)" if regime_dependent else "국면 의존적이지 않음"
+    
     table = pd.DataFrame({"log_return_sum": by_year, "contribution": contribution})
-    regime_dependent = contribution.abs().max() > 0.5 if total != 0 else True
-    return table, regime_dependent
+    return table, verdict
